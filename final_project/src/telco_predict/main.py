@@ -63,7 +63,7 @@ async def predict_test(
 
 
 @app.post("/predict/{model_id}", status_code=200)
-async def predict_route(
+async def predict(
         model_id: str,
         model_input: Dict[str, List[Any]],
         response: Response

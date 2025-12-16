@@ -6,7 +6,7 @@ import json
 import warnings
 
 from pathlib import Path
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List, Optional
 from datetime import datetime
 
 import pandas as pd
@@ -24,6 +24,14 @@ class MLModelHandler:
 
 
     def __init__(self, config_path: Path, random_seed: int) -> None:
+        """
+        Initializes a new ML model handler object.
+        This object handles train and test data operations in the database,
+            model training and evaluation, as well as model version control.
+
+        :param config_path: The path to the config file of the handler.
+        :param random_seed: Seeding of random operations for reproducability.
+        """
 
         # Set up logging
         self.logger = logging.getLogger("MLModelHandler")
@@ -60,7 +68,7 @@ class MLModelHandler:
         connection = sqlite3.connect(self.config_data["database"])
         self.expected_columns = pd.Index([
             element[1] for element in
-            connection.execute("PRAGMA table_info(telco)").fetchall()
+            connection.execute(f"PRAGMA table_info({self.config_data['database_table']})").fetchall()
         ]).drop(["index", "Churn", "is_test", ])
         connection.close()
 
@@ -68,6 +76,13 @@ class MLModelHandler:
 
 
     def _load_preprocessor_config(self) -> Dict[str, Any]:
+        """
+        Loads the raw dataframe preprocessor config file from the artifacts directory.
+        This tells the handler how to process specific columns in an input dataframe,
+            before adding data to the database or running an ML training/prediction.
+
+        :return: The preprocessor config dictionary.
+        """
 
         preprocessor_file = Path(self.config_data["artifacts_dir"]) / "preprocessing_config.pkl"
         with open(preprocessor_file, "rb") as f:
@@ -76,7 +91,34 @@ class MLModelHandler:
         return preprocessor
 
 
+    def _add_random_test_mask(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        This method adds a new column to a dataframe with a title of is_test.
+        This column contains zeros and ones, assigned randomly to each row.
+        The number of ones is dictated by the train_test_split value in the config file.
+
+        :param df: The target dataframe.
+        :return: The same dataframe, but with the is_test column added.
+        """
+
+        test_mask = self.random_number_generator.choice(
+            len(df), size=int(len(df) * self.config_data["train_test_split"])
+        )
+        test_flags = np.zeros(len(df), dtype=int)
+        test_flags[test_mask] = 1
+        df["is_test"] = test_flags
+
+        self.logger.info(f"Added test flag for {len(test_mask)} entries randomly.")
+
+        return df
+
+
     def _initialize_database(self) -> None:
+        """
+        Initializes a new sqlite3 database according to the ML handler's config and
+            populates it with data from the preprocessed TELCO dataset found in the
+            artifacts directory.
+        """
 
         # Check for database existence
         if Path(self.config_data["database"]).exists():
@@ -91,30 +133,29 @@ class MLModelHandler:
         self.logger.info(f"Original dataset loaded with shape: {original_dataset.shape}.")
 
         # Add train/test indicator column
-        test_mask = self.random_number_generator.choice(
-            len(original_dataset),
-            size=int(len(original_dataset) * self.config_data["train_test_split"])
-        )
-        test_flags = np.zeros(len(original_dataset), dtype=int)
-        test_flags[test_mask] = 1
-        original_dataset["is_test"] = test_flags
-
-        self.logger.info(f"Added test flag for {len(test_mask)} entries.")
+        original_dataset = self._add_random_test_mask(original_dataset)
 
         # Write the DataFrame content to the database
         connection = sqlite3.connect(self.config_data["database"])
-        original_dataset.to_sql(name="telco", con=connection)
+        original_dataset.to_sql(name=self.config_data["database_table"], con=connection)
         connection.close()
 
         self.logger.info(f"Original dataset successfully written to database.")
 
 
     def _query_data(self, is_test: bool) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Queries data from the database based on the is_test flag and separates it into a
+            model_input and a model_target numpy array.
+
+        :param is_test: Whether to query rows flagged for testing or rows flagged for training.
+        :return: The input and output arrays. The latter one is the Churn column.
+        """
 
         # Connect to the database and query
         connection = sqlite3.connect(self.config_data["database"])
         training_data = pd.read_sql(
-            f"SELECT * FROM telco WHERE is_test = {1 if is_test else 0}",
+            f"SELECT * FROM {self.config_data['database_table']} WHERE is_test = {1 if is_test else 0}",
             connection
         )
         connection.close()
@@ -122,14 +163,23 @@ class MLModelHandler:
         self.logger.info(f"Queried {len(training_data)} entries from the database ({is_test=}).")
 
         # Preprocess raw database data for training
-        y_train = training_data["Churn"].values
-        x_train = training_data.drop(columns=["index", "Churn", "is_test"]).values
+        model_target = training_data["Churn"].values
+        model_input = training_data.drop(columns=["index", "Churn", "is_test"]).values
 
-        return x_train, y_train
+        return model_input, model_target
 
 
     @staticmethod
     def _evaluate_model(model: RandomForestClassifier, x: np.ndarray, y_true: np.ndarray) -> Dict[str, float]:
+        """
+        Evaluates the performance of a random forest classifier model on a specific input-output pair.
+
+        :param model: The model in question.
+        :param x: The model input.
+        :param y_true: The model target output.
+        :return: A dictionary containing the model's Matthews correlation coefficient, accuracy, F1-score,
+            precision and recall values.
+        """
 
         y_prediction = model.predict(x)
 
@@ -143,6 +193,18 @@ class MLModelHandler:
 
 
     def _preprocess_pandas_df(self, model_input: pd.DataFrame) -> pd.DataFrame:
+        """
+        Preprocesses a dataframe based on the preprocessor config loaded from the _load_preprocessor_config
+            method.
+        Removes unnecessary columns, encodes binary and multiclass columns, handles imputer and standardizer
+            actions.
+        All columns specified in the preprocessor config must be present in the dataframe, except for the
+            Churn target column, which is optional (during inference, it is not available, but during training,
+            it is necessary).
+
+        :param model_input: The dataframe that must be processed.
+        :return: The processed dataframe.
+        """
 
         # Remove the unnecessary columns
         model_input.drop(columns=self.preprocessor["columns_to_remove"], inplace=True)
@@ -196,10 +258,22 @@ class MLModelHandler:
 
             model_input[column_name] = scaler.transform(transformed_column)
 
+        # Filter out only the necessary columns
+        # TODO: this filtering is not always good!
+        #   The expected_columns does not contain the Churn column!
+        model_input = model_input[self.expected_columns]
+
         return model_input
 
 
     def train_model(self) -> Dict[str, Any]:
+        """
+        Trains and evaluates a new random forest classifier using data retrieved from the database.
+        It also registers the new model in the history JSON file and saves the trained model in a
+            pickled format.
+
+        :return: The new record dictionary that was added to the history file.
+        """
 
         # Check for model history existence
         history_path = Path(self.config_data["models_dir"]) / "history.json"
@@ -261,6 +335,11 @@ class MLModelHandler:
 
 
     def list_available_models(self) -> List[Dict[str, Any]]:
+        """
+        Lists all available models registered in the history file.
+
+        :return: All records from the history JSON file.
+        """
 
         history_path = Path(self.config_data["models_dir"]) / "history.json"
 
@@ -273,11 +352,26 @@ class MLModelHandler:
         return history
 
 
-    def run_model(self, model_id: str, model_input: pd.DataFrame):
+    def run_model(self, model_id: str, model_input: pd.DataFrame) -> List[int]:
+        """
+        After checking for model ID validity, it loads the specified model and runs it
+            on the preprocessed model input.
+        The model ID must be registered in the history JSON file in order to load it
+            successfully.
+
+        :param model_id: The ID of the model to be used.
+            This can be obtained by calling the list_available_models method.
+        :param model_input: The raw, unprocessed input dataframe to the model.
+        :return:
+        """
+
+        self.logger.info(
+            f"Preparing for inference with model_id {model_id} "
+            f"and with an (unprocessed) dataframe shape of {model_input.shape}."
+        )
 
         # Preprocess the input dataframe
         model_input = self._preprocess_pandas_df(model_input)
-        model_input = model_input[self.expected_columns]
 
         # Check for history file existence
         history_path = Path(self.config_data["models_dir"]) / "history.json"
@@ -302,7 +396,51 @@ class MLModelHandler:
         with open(model_file, "rb") as f:
             model = pickle.load(f)
 
-        return model.predict(model_input.values).tolist()
+        # TODO: If the model_input also contains a target (Churn) column, calculate performance.
+        #   For this, resolve the problem in the _preprocess_pandas_df method!
+
+        # Calculate model prediction
+        model_prediction = model.predict(model_input.values)
+
+        self.logger.info(
+            f"Model prediction ran with a predicted churn rate of {np.mean(model_prediction):.3%}."
+        )
+
+        return model_prediction.tolist()
+
+
+    def extend_database(self, new_rows: pd.DataFrame, is_test: Optional[bool]) -> None:
+        """
+        Extends the database with new rows from the specified database.
+        The is_test column is populated according to the is_test argument:
+        - if it's None, then it is assigned randomly to the new rows,
+        - if it's True, then all new rows will be flagged as testing rows,
+        - if it's False, then all new rows will be flagged as training rows.
+
+        :param new_rows: The dataframe to be added to the database.
+        :param is_test: It specifies how the is_test column is populated.
+        :return:
+        """
+
+        # TODO: test this!
+
+        # Preprocess the input dataframe
+        new_rows = self._preprocess_pandas_df(new_rows)
+
+        # Add a test indicator column
+        if is_test is None:
+            new_rows = self._add_random_test_mask(new_rows)
+        elif is_test:
+            new_rows["is_test"] = np.ones(len(new_rows))
+        elif not is_test:
+            new_rows["is_test"] = np.zeros(len(new_rows))
+        else:
+            raise Exception("Unreachable!")
+
+        # Connect to the database and add the new rows
+        connection = sqlite3.connect(self.config_data["database"])
+        new_rows.to_sql(self.config_data["database_table"], connection, if_exists="append")
+        connection.close()
 
 
 def main():

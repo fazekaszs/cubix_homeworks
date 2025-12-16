@@ -2,6 +2,7 @@
 artifacts_dir = "./artifacts"
 models_dir = "./models"
 database = "./customer_data.db"
+database_table = "telco"
 
 # original test size from the model training notebook
 train_test_split = 0.432
