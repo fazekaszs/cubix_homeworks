@@ -52,8 +52,19 @@ class MLModelHandler:
         self.preprocessor = self._load_preprocessor_config()
 
         # Run database initialization
-        self.expected_columns = None
         self._initialize_database()
+
+        # Set the value for the expected columns field.
+        # Since the Churn column is the target column, we should remove it.
+        # We also do not need the index and is_test columns.
+        connection = sqlite3.connect(self.config_data["database"])
+        self.expected_columns = pd.Index([
+            element[1] for element in
+            connection.execute("PRAGMA table_info(telco)").fetchall()
+        ]).drop(["index", "Churn", "is_test", ])
+        connection.close()
+
+        self.logger.info(f"The {len(self.expected_columns)} column names are: {self.expected_columns}.")
 
 
     def _load_preprocessor_config(self) -> Dict[str, Any]:
@@ -79,12 +90,6 @@ class MLModelHandler:
 
         self.logger.info(f"Original dataset loaded with shape: {original_dataset.shape}.")
 
-        # Set the value for the expected columns field
-        # Since the Churn column is the target column, we should remove it
-        self.expected_columns = original_dataset.columns.drop(["Churn", ]).values
-
-        self.logger.info(f"Column names are: {self.expected_columns}.")
-
         # Add train/test indicator column
         test_mask = self.random_number_generator.choice(
             len(original_dataset),
@@ -98,7 +103,7 @@ class MLModelHandler:
 
         # Write the DataFrame content to the database
         connection = sqlite3.connect(self.config_data["database"])
-        original_dataset.to_sql(name="train", con=connection)
+        original_dataset.to_sql(name="telco", con=connection)
         connection.close()
 
         self.logger.info(f"Original dataset successfully written to database.")
@@ -109,7 +114,7 @@ class MLModelHandler:
         # Connect to the database and query
         connection = sqlite3.connect(self.config_data["database"])
         training_data = pd.read_sql(
-            f"SELECT * FROM train WHERE is_test = {1 if is_test else 0}",
+            f"SELECT * FROM telco WHERE is_test = {1 if is_test else 0}",
             connection
         )
         connection.close()
@@ -118,7 +123,7 @@ class MLModelHandler:
 
         # Preprocess raw database data for training
         y_train = training_data["Churn"].values
-        x_train = training_data.drop(columns=["Churn", "is_test"]).values
+        x_train = training_data.drop(columns=["index", "Churn", "is_test"]).values
 
         return x_train, y_train
 
@@ -137,7 +142,7 @@ class MLModelHandler:
         }
 
 
-    def _preprocess_pandas_df(self, model_input: pd.DataFrame):
+    def _preprocess_pandas_df(self, model_input: pd.DataFrame) -> pd.DataFrame:
 
         # Remove the unnecessary columns
         model_input.drop(columns=self.preprocessor["columns_to_remove"], inplace=True)
@@ -145,6 +150,12 @@ class MLModelHandler:
         # Encode binary columns
         for binary_column_list, column_encoder in self.preprocessor["binary_columns"]:
             for binary_column_name in binary_column_list:
+
+                # Skip the binary Churn column, if it does not exist, like
+                # during inference
+                if binary_column_name == "Churn" and "Churn" not in model_input.columns:
+                    continue
+
                 model_input[binary_column_name] = column_encoder.transform(model_input[binary_column_name])
 
         # Encode multiclass columns
@@ -184,6 +195,8 @@ class MLModelHandler:
                 raise Exception("Invalid transformation name!")
 
             model_input[column_name] = scaler.transform(transformed_column)
+
+        return model_input
 
 
     def train_model(self) -> Dict[str, Any]:
@@ -262,12 +275,9 @@ class MLModelHandler:
 
     def run_model(self, model_id: str, model_input: pd.DataFrame):
 
-        # Check for column naming validity
-        for column_name in self.expected_columns:
-            if column_name not in model_input.columns:
-                error_msg = f"The necessary column name {column_name} is not found in the input!"
-                self.logger.error(error_msg)
-                raise RunModelError(error_msg)
+        # Preprocess the input dataframe
+        model_input = self._preprocess_pandas_df(model_input)
+        model_input = model_input[self.expected_columns]
 
         # Check for history file existence
         history_path = Path(self.config_data["models_dir"]) / "history.json"
@@ -292,8 +302,7 @@ class MLModelHandler:
         with open(model_file, "rb") as f:
             model = pickle.load(f)
 
-        # Preprocess the input dataframe
-        self._preprocess_pandas_df(model_input)
+        return model.predict(model_input.values).tolist()
 
 
 def main():

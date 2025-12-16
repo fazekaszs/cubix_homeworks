@@ -1,6 +1,7 @@
 # https://fastapi.tiangolo.com/tutorial/response-status-code/
 # https://fastapi.tiangolo.com/advanced/response-change-status-code/#use-a-response-parameter
 import tomllib
+import pickle
 
 from typing import List, Dict, Any
 from pathlib import Path
@@ -46,8 +47,14 @@ async def predict_test(
         response: Response
 ) -> Dict[str, Any]:
 
+    test_df_path = Path(app_config["testfiles_dir"]) / test_filename
+    with open(test_df_path, "rb") as f:
+        test_df = pickle.load(f)
+
+    test_df.drop(columns=["Churn", ], inplace=True)
+
     try:
-        result = ml_model_handler.run_model(model_id, pd.DataFrame(data=model_input))
+        result = ml_model_handler.run_model(model_id, test_df)
     except RunModelError as e:
         response.status_code = status.HTTP_400_BAD_REQUEST
         return {"error": str(e)}
@@ -77,9 +84,4 @@ async def train_route():
 
 
 if __name__ == "__main__":
-
-    uvicorn.run(
-        app,
-        host=app_config["host"],
-        port=app_config["port"]
-    )
+    uvicorn.run(app, host=app_config["host"], port=app_config["port"])
