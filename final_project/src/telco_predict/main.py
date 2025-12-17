@@ -1,7 +1,6 @@
 # https://fastapi.tiangolo.com/tutorial/response-status-code/
 # https://fastapi.tiangolo.com/advanced/response-change-status-code/#use-a-response-parameter
 import tomllib
-import pickle
 
 from typing import List, Dict, Any
 from pathlib import Path
@@ -40,28 +39,6 @@ async def train() -> Dict[str, Any]:
     return train_record
 
 
-@app.post("/predict_test/{model_id}", status_code=200)
-async def predict_test(
-        model_id: str,
-        test_filename: str,
-        response: Response
-) -> Dict[str, Any]:
-
-    test_df_path = Path(app_config["testfiles_dir"]) / test_filename
-    with open(test_df_path, "rb") as f:
-        test_df = pickle.load(f)
-
-    test_df.drop(columns=["Churn", ], inplace=True)
-
-    try:
-        result = ml_model_handler.run_model(model_id, test_df)
-    except RunModelError as e:
-        response.status_code = status.HTTP_400_BAD_REQUEST
-        return {"error": str(e)}
-
-    return {"result": result}
-
-
 @app.post("/predict/{model_id}", status_code=200)
 async def predict(
         model_id: str,
@@ -69,13 +46,15 @@ async def predict(
         response: Response
 ) -> Dict[str, Any]:
 
+    df = pd.DataFrame(**model_input)
+
     try:
-        result = ml_model_handler.run_model(model_id, pd.DataFrame(data=model_input))
+        result = ml_model_handler.run_model(model_id, df)
     except RunModelError as e:
         response.status_code = status.HTTP_400_BAD_REQUEST
         return {"error": str(e)}
 
-    return {"result": result}
+    return result
 
 
 @app.post("/add_rows")

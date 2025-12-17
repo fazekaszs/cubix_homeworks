@@ -63,14 +63,18 @@ class MLModelHandler:
         self._initialize_database()
 
         # Set the value for the expected columns field.
-        # Since the Churn column is the target column, we should remove it.
-        # We also do not need the index and is_test columns.
         connection = sqlite3.connect(self.config_data["database"])
-        self.expected_columns = pd.Index([
+        self.expected_columns: List[str] = [
             element[1] for element in
             connection.execute(f"PRAGMA table_info({self.config_data['database_table']})").fetchall()
-        ]).drop(["index", "Churn", "is_test", ])
+        ]
         connection.close()
+
+        # Since the Churn column is the target column, we should remove it.
+        # We also do not need the index and is_test columns.
+        self.expected_columns.remove("index")
+        self.expected_columns.remove("Churn")
+        self.expected_columns.remove("is_test")
 
         self.logger.info(f"The {len(self.expected_columns)} column names are: {self.expected_columns}.")
 
@@ -170,18 +174,23 @@ class MLModelHandler:
 
 
     @staticmethod
-    def _evaluate_model(model: RandomForestClassifier, x: np.ndarray, y_true: np.ndarray) -> Dict[str, float]:
+    def _evaluate_model(
+        y_prediction: Tuple[RandomForestClassifier, np.ndarray] | np.ndarray,
+        y_true: np.ndarray
+    ) -> Dict[str, float]:
         """
         Evaluates the performance of a random forest classifier model on a specific input-output pair.
 
-        :param model: The model in question.
-        :param x: The model input.
+        :param y_prediction: Either a numpy array of predicted values or a (model, input) pair as a tuple.
         :param y_true: The model target output.
         :return: A dictionary containing the model's Matthews correlation coefficient, accuracy, F1-score,
             precision and recall values.
         """
 
-        y_prediction = model.predict(x)
+        if type(y_prediction) is tuple:
+            y_prediction = y_prediction[0].predict(y_prediction[1])
+        else:
+            pass
 
         return {
             "mcc": metrics.matthews_corrcoef(y_true, y_prediction),
@@ -259,10 +268,11 @@ class MLModelHandler:
             model_input[column_name] = scaler.transform(transformed_column)
 
         # Filter out only the necessary columns
-        # TODO: this filtering is not always good!
-        #   The expected_columns does not contain the Churn column!
-        model_input = model_input[self.expected_columns]
+        if "Churn" in model_input.columns:
+            model_input = model_input[self.expected_columns + ["Churn", ]]
+            return model_input
 
+        model_input = model_input[self.expected_columns]
         return model_input
 
 
@@ -303,11 +313,11 @@ class MLModelHandler:
         self.logger.info(f"Model with ID {model_id} created and trained.")
 
         # Calculate model performance
-        performance_train = self._evaluate_model(model, x_train, y_train)
+        performance_train = self._evaluate_model((model, x_train), y_train)
 
         # Test the model
         x_test, y_test = self._query_data(is_test=True)
-        performance_test = self._evaluate_model(model, x_test, y_test)
+        performance_test = self._evaluate_model((model, x_test), y_test)
 
         # Create model record
         record = {
@@ -352,7 +362,7 @@ class MLModelHandler:
         return history
 
 
-    def run_model(self, model_id: str, model_input: pd.DataFrame) -> List[int]:
+    def run_model(self, model_id: str, model_input: pd.DataFrame) -> Dict[str, Any]:
         """
         After checking for model ID validity, it loads the specified model and runs it
             on the preprocessed model input.
@@ -362,7 +372,7 @@ class MLModelHandler:
         :param model_id: The ID of the model to be used.
             This can be obtained by calling the list_available_models method.
         :param model_input: The raw, unprocessed input dataframe to the model.
-        :return:
+        :return: The results of the model run.
         """
 
         self.logger.info(
@@ -372,6 +382,12 @@ class MLModelHandler:
 
         # Preprocess the input dataframe
         model_input = self._preprocess_pandas_df(model_input)
+
+        # Check whether a target column is given
+        target_values = None
+        if "Churn" in model_input.columns:
+            target_values = model_input["Churn"].values
+            model_input.drop(columns=["Churn", ], inplace=True)
 
         # Check for history file existence
         history_path = Path(self.config_data["models_dir"]) / "history.json"
@@ -396,17 +412,23 @@ class MLModelHandler:
         with open(model_file, "rb") as f:
             model = pickle.load(f)
 
-        # TODO: If the model_input also contains a target (Churn) column, calculate performance.
-        #   For this, resolve the problem in the _preprocess_pandas_df method!
+        # Initialize the output dictionary
+        output = dict()
 
         # Calculate model prediction
         model_prediction = model.predict(model_input.values)
+        output["model_prediction"] = model_prediction.tolist()
 
         self.logger.info(
             f"Model prediction ran with a predicted churn rate of {np.mean(model_prediction):.3%}."
         )
 
-        return model_prediction.tolist()
+        # If the model_input also contains a target (Churn) column, calculate performance.
+        if target_values is not None:
+            model_performance = self._evaluate_model(model_prediction, target_values)
+            output["model_performance"] = model_performance
+
+        return output
 
 
     def extend_database(self, new_rows: pd.DataFrame, is_test: Optional[bool]) -> None:
