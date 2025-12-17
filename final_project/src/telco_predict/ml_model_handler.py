@@ -27,7 +27,7 @@ class MLModelHandler:
         """
         Initializes a new ML model handler object.
         This object handles train and test data operations in the database,
-            model training and evaluation, as well as model version control.
+        model training and evaluation, as well as model version control.
 
         :param config_path: The path to the config file of the handler.
         :param random_seed: Seeding of random operations for reproducability.
@@ -83,7 +83,7 @@ class MLModelHandler:
         """
         Loads the raw dataframe preprocessor config file from the artifacts directory.
         This tells the handler how to process specific columns in an input dataframe,
-            before adding data to the database or running an ML training/prediction.
+        before adding data to the database or running an ML training/prediction.
 
         :return: The preprocessor config dictionary.
         """
@@ -120,8 +120,8 @@ class MLModelHandler:
     def _initialize_database(self) -> None:
         """
         Initializes a new sqlite3 database according to the ML handler's config and
-            populates it with data from the preprocessed TELCO dataset found in the
-            artifacts directory.
+        populates it with data from the preprocessed TELCO dataset found in the
+        artifacts directory.
         """
 
         # Check for database existence
@@ -150,7 +150,7 @@ class MLModelHandler:
     def _query_data(self, is_test: bool) -> Tuple[np.ndarray, np.ndarray]:
         """
         Queries data from the database based on the is_test flag and separates it into a
-            model_input and a model_target numpy array.
+        model_input and a model_target numpy array.
 
         :param is_test: Whether to query rows flagged for testing or rows flagged for training.
         :return: The input and output arrays. The latter one is the Churn column.
@@ -204,12 +204,12 @@ class MLModelHandler:
     def _preprocess_pandas_df(self, model_input: pd.DataFrame) -> pd.DataFrame:
         """
         Preprocesses a dataframe based on the preprocessor config loaded from the _load_preprocessor_config
-            method.
+        method.
         Removes unnecessary columns, encodes binary and multiclass columns, handles imputer and standardizer
-            actions.
+        actions.
         All columns specified in the preprocessor config must be present in the dataframe, except for the
-            Churn target column, which is optional (during inference, it is not available, but during training,
-            it is necessary).
+        Churn target column, which is optional (during inference, it is not available, but during training,
+        it is necessary).
 
         :param model_input: The dataframe that must be processed.
         :return: The processed dataframe.
@@ -280,7 +280,7 @@ class MLModelHandler:
         """
         Trains and evaluates a new random forest classifier using data retrieved from the database.
         It also registers the new model in the history JSON file and saves the trained model in a
-            pickled format.
+        pickled format.
 
         :return: The new record dictionary that was added to the history file.
         """
@@ -365,9 +365,9 @@ class MLModelHandler:
     def run_model(self, model_id: str, model_input: pd.DataFrame) -> Dict[str, Any]:
         """
         After checking for model ID validity, it loads the specified model and runs it
-            on the preprocessed model input.
+        on the preprocessed model input.
         The model ID must be registered in the history JSON file in order to load it
-            successfully.
+        successfully.
 
         :param model_id: The ID of the model to be used.
             This can be obtained by calling the list_available_models method.
@@ -435,6 +435,7 @@ class MLModelHandler:
         """
         Extends the database with new rows from the specified database.
         The is_test column is populated according to the is_test argument:
+
         - if it's None, then it is assigned randomly to the new rows,
         - if it's True, then all new rows will be flagged as testing rows,
         - if it's False, then all new rows will be flagged as training rows.
