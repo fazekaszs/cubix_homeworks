@@ -106,7 +106,9 @@ class MLModelHandler:
         """
 
         test_mask = self.random_number_generator.choice(
-            len(df), size=int(len(df) * self.config_data["train_test_split"])
+            len(df),
+            size=int(len(df) * self.config_data["train_test_split"]),
+            replace=False
         )
         test_flags = np.zeros(len(df), dtype=int)
         test_flags[test_mask] = 1
@@ -445,10 +447,12 @@ class MLModelHandler:
         :return:
         """
 
-        # TODO: test this!
-
         # Preprocess the input dataframe
         new_rows = self._preprocess_pandas_df(new_rows)
+
+        self.logger.info(
+            f"Attempting to extend the database with a dataframe of shape {new_rows.shape}."
+        )
 
         # Add a test indicator column
         if is_test is None:
@@ -464,6 +468,10 @@ class MLModelHandler:
         connection = sqlite3.connect(self.config_data["database"])
         new_rows.to_sql(self.config_data["database_table"], connection, if_exists="append")
         connection.close()
+
+        self.logger.info(
+            f"Database successfully extended."
+        )
 
 
 def main():
