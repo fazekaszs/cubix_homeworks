@@ -98,3 +98,16 @@ that calls the running server using the unprocessed datafile
 It successively extends the database with synthetic data, retrains models and
 evaluates their performance.
 Doing this, it plots the performance change of the newly trained models.
+
+## Docker
+
+A `Dockerfile` is also provided to run the server in a containerized manner.
+The following commands can be used to build the image and to run it:
+```bash
+docker build -t telco_predict .
+docker run -d -p {outer port}:{inner port} telco_predict
+```
+After this, the running container can be tested by running the `call_api.py`
+script in the `testfiles` directory.
+__Important__: the exposed port number in the Dockerfile must be the same with
+the port number specified in the `config.toml` file!

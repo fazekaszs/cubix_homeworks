@@ -5,12 +5,13 @@ dependencies = [
     "pandas >= 2.3.1",
     "fastapi >= 0.122.0",
     "numpy >= 2.0.0",
-    "scikit-learn >= 1.7.1"
+    "scikit-learn >= 1.7.1",
+    "uvicorn >= 0.38.0"
 ]
 authors = [{ name = "Zsolt Fazekas", email = "zsolt.fazekas.9@gmail.com" }, ]
 description = "API server for customer churn prediction on the TELCO dataset."
 readme = "README.md"
-requires-python = ">= 3.12.3"
+requires-python = ">= 3.12.0"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
