@@ -124,7 +124,9 @@ def main():
         df: pd.DataFrame = pickle.load(f)
 
     performances = list()
-    fig, ax = plt.subplots(1, 2)
+    fig, ax = plt.subplots(1, 5)
+    fig.set_size_inches(20, 5)
+    fig.subplots_adjust(wspace=0.5)
 
     for idx in range(20):
 
@@ -135,30 +137,45 @@ def main():
         df = pd.concat([df, new_rows], axis=0).reset_index(drop=True)
         call_extend(new_rows)
 
-        # Get the performance of the OLD remote model on the extended dataframe
-        old_mcc = call_predict(model_id, df)["model_performance"]["mcc"]
+        # Get the performance of the NEW remote model on the extended dataframe
+        old_performance = call_predict(model_id, df)["model_performance"]
 
         # Retrain the model on the extended database
         record = call_train()
         model_id = record["model_id"]
 
         # Get the performance of the NEW remote model on the extended dataframe
-        new_mcc = call_predict(model_id, df)["model_performance"]["mcc"]
+        new_performance = call_predict(model_id, df)["model_performance"]
+
+        # Print performance change on the extended dataframe before and after retraining
+        print(f"MCC change: {old_performance['mcc']:.3%} -> {new_performance['mcc']:.3%}")
 
         # Record the MCC values
-        performances.append((old_mcc, new_mcc))
+        performances.append(new_performance)
 
         # Plot the performances
         # At first, it should degrade due to the "database poisoning" of the new rows.
         # Then, it should rebound, since the new logic in the new rows is simple to learn,
         # and they start to dominate over the original data.
-        performances_np = np.array(performances)
 
-        ax[0].cla()
-        ax[0].plot(performances_np[:, 0])
+        for axis in ax:
+            axis.cla()
+            axis.set_xlabel("Number of retrain turns")
 
-        ax[1].cla()
-        ax[1].plot(performances_np[:, 0])
+        ax[0].plot([p["mcc"] for p in performances])
+        ax[0].set_ylabel("Mathew's Correlation Coefficient")
+
+        ax[1].plot([p["acc"] for p in performances])
+        ax[1].set_ylabel("Accuracy")
+
+        ax[2].plot([p["f1"] for p in performances])
+        ax[2].set_ylabel("F1-score")
+
+        ax[3].plot([p["precision"] for p in performances])
+        ax[3].set_ylabel("Precision")
+
+        ax[4].plot([p["recall"] for p in performances])
+        ax[4].set_ylabel("Recall")
 
         plt.pause(0.1)
 

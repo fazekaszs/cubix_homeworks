@@ -1,5 +1,3 @@
-# https://fastapi.tiangolo.com/tutorial/response-status-code/
-# https://fastapi.tiangolo.com/advanced/response-change-status-code/#use-a-response-parameter
 import tomllib
 
 from typing import List, Dict, Any
@@ -10,7 +8,7 @@ from fastapi import FastAPI, Response, status
 from pydantic import BaseModel
 import uvicorn
 
-from ml_model_handler import MLModelHandler, RunModelError
+from .ml_model_handler import MLModelHandler, RunModelError
 
 
 CONFIG_PATH = Path("config.toml")
